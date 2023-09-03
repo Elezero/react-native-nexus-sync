@@ -18,10 +18,10 @@ interface UseNexusSyncProps<T extends NexusGenericPrimaryType> {
   autoRefreshOnBackOnline?: boolean;
   onBackOnline?: () => any;
   remoteMethods?: {
-    GET: () => Promise<T[]>;
-    CREATE: (item: T) => Promise<T>;
-    UPDATE: (item: T) => Promise<T>;
-    DELETE: (item: string) => Promise<string>;
+    GET?: () => Promise<T[]>;
+    CREATE?: (item: T) => Promise<T>;
+    UPDATE?: (item: T) => Promise<T>;
+    DELETE?: (item: string) => Promise<string>;
   };
 }
 
@@ -32,9 +32,18 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
   const [isLoading, setLoading] = useState<boolean>(false);
   const [data, setData] = useState<T[]>([]);
   const [error, setError] = useState<string | undefined>(undefined);
-  const [dataDeletedOffline, setDataDeletedOffline] = useState<string[]>([]);
+  const [isLocalDataUptoDate, setIsLocalDataUptoDate] = useState<
+    boolean | undefined
+  >(undefined);
+  const [isRemoteDataUptoDate, setIsRemoteDataUptoDate] = useState<
+    boolean | undefined
+  >(undefined);
+  const [numberOfChangesPending, setNumberOfChangesPending] = useState<
+    number | undefined
+  >(undefined);
 
   // CONTROL VARIABLES
+  const [dataDeletedOffline, setDataDeletedOffline] = useState<string[]>([]);
   const [backOnLine, setBackOnLine] = useState<boolean>(false);
   const hasDataChanged = useRef(false);
   const hasDeletedChanged = useRef(false);
@@ -76,12 +85,24 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 			--- IMPORTANT USE EFFECTS --- 
 	*/
   useEffect(() => {
-    if (!props.loadFirstRemote || props.remoteMethods === undefined) {
+    if (
+      !props.loadFirstRemote ||
+      props.remoteMethods === undefined ||
+      props.remoteMethods.GET === undefined
+    ) {
       getLocalData();
     }
   }, []);
 
   useEffect(() => {
+    console.log(
+      `isLocalDataUptoDate |=========>`,
+      JSON.stringify(isLocalDataUptoDate)
+    );
+    console.log(
+      `isRemoteDataUptoDate |=========>`,
+      JSON.stringify(isRemoteDataUptoDate)
+    );
     if (data.length > 0 && hasDataChanged.current) {
       updateLocalData();
     }
@@ -105,18 +126,19 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
             setData(localData);
           } catch {
             (err: any) => {
-              setError(`ERROR 001:` + JSON.stringify(err));
+              setError(`ERROR NEXUSSYNC_001:` + JSON.stringify(err));
             };
           }
         }
       })
       .catch((err: any) => {
-        setError(`ERROR 002:` + JSON.stringify(err));
+        setError(`ERROR NEXUSSYNC_002:` + JSON.stringify(err));
       });
   }, [setData, props.async_DATA_KEY]);
 
   const getRemoteData = useCallback(() => {
     props.remoteMethods &&
+      props.remoteMethods.GET &&
       props.remoteMethods
         .GET()
         .then((res) => {
@@ -127,7 +149,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           setLoading(false);
         })
         .catch((err: any) => {
-          setError(`ERROR 003:` + JSON.stringify(err));
+          setError(`ERROR NEXUSSYNC_003:` + JSON.stringify(err));
         });
   }, [props.remoteMethods, setLoading]);
 
@@ -143,7 +165,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
               hasDataChanged.current = true;
             } catch {
               (err: any) => {
-                setError(`ERROR 005:` + JSON.stringify(err));
+                setError(`ERROR NEXUSSYNC_005:` + JSON.stringify(err));
               };
             }
           }
@@ -151,7 +173,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           compareLocalVsRemoteData(remoteData, dataToDelete);
         })
         .catch((err: any) => {
-          setError(`ERROR 004:` + JSON.stringify(err));
+          setError(`ERROR NEXUSSYNC_004:` + JSON.stringify(err));
           compareLocalVsRemoteData(remoteData, []);
         });
     },
@@ -262,7 +284,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
               }
             } catch {
               (err: any) => {
-                setError(`ERROR 006:` + JSON.stringify(err));
+                setError(`ERROR NEXUSSYNC_006:` + JSON.stringify(err));
               };
             }
           } else {
@@ -272,8 +294,28 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           }
 
           hasDataChanged.current = _hasDataChanged;
+          setIsLocalDataUptoDate(true);
 
           if (isOnline) {
+            setNumberOfChangesPending(
+              dataToDelete.length + dataToCreate.length + dataToEdit.length
+            );
+            console.log(
+              `NumberOfChangesPending |=========>`,
+              JSON.stringify(
+                dataToDelete.length + dataToCreate.length + dataToEdit.length
+              )
+            );
+            console.log(
+              `dataToDelete |=========>`,
+              JSON.stringify(dataToDelete)
+            );
+            console.log(
+              `dataToCreate |=========>`,
+              JSON.stringify(dataToCreate)
+            );
+            console.log(`dataToEdit |=========>`, JSON.stringify(dataToEdit));
+
             syncDeletedLocalItemsToRemote(
               dataToDelete,
               dataToCreate,
@@ -283,7 +325,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           }
         })
         .catch((err: any) => {
-          setError(`ERROR 007:` + JSON.stringify(err));
+          setError(`ERROR NEXUSSYNC_007:` + JSON.stringify(err));
         });
     },
     [props.async_DATA_KEY, isOnline]
@@ -313,108 +355,210 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
     ) => {
       let itemsFinal = dataWithoutChanges;
 
-      if (dataToDelete.length > 0) {
-        Promise.all(
-          dataToDelete.map(async (item) => {
-            try {
-              const itemDeleted =
-                props.remoteMethods && props.remoteMethods.DELETE(item);
+      if (props.remoteMethods && props.remoteMethods.DELETE) {
+        if (dataToDelete.length > 0) {
+          Promise.all(
+            dataToDelete.map(async (item) => {
+              try {
+                const itemDeleted =
+                  props.remoteMethods &&
+                  props.remoteMethods.DELETE &&
+                  props.remoteMethods.DELETE(item);
 
-              return itemDeleted;
-            } catch (err: any) {
-              setError(`ERROR 020:` + JSON.stringify(err));
-              return null;
-            }
-          })
-        )
-          .then(() => {
-            hasDeletedChanged.current = true;
-            setDataDeletedOffline([]);
-            syncCreatedLocalItemsToRemote(dataToCreate, dataToEdit, itemsFinal);
-          })
-          .catch((err: any) => {
-            setError(`ERROR 008:` + JSON.stringify(err));
-          });
+                return itemDeleted;
+              } catch (err: any) {
+                setError(`ERROR NEXUSSYNC_020:` + JSON.stringify(err));
+                return null;
+              }
+            })
+          )
+            .then(() => {
+              hasDeletedChanged.current = true;
+              setDataDeletedOffline([]);
+
+              if (numberOfChangesPending && numberOfChangesPending > 0) {
+                setNumberOfChangesPending(
+                  numberOfChangesPending - dataToDelete.length
+                );
+              }
+
+              syncCreatedLocalItemsToRemote(
+                dataToCreate,
+                dataToEdit,
+                itemsFinal,
+                true
+              );
+            })
+            .catch((err: any) => {
+              setError(`ERROR NEXUSSYNC_008:` + JSON.stringify(err));
+            });
+        } else {
+          syncCreatedLocalItemsToRemote(
+            dataToCreate,
+            dataToEdit,
+            itemsFinal,
+            true
+          );
+        }
       } else {
-        syncCreatedLocalItemsToRemote(dataToCreate, dataToEdit, itemsFinal);
+        // if (dataToDelete.length > 0) {
+        // 	dataToDelete.map(itemx => {
+        // 		if (itemx !== null && itemx !== undefined) {
+        // 			dataWithoutChanges.push(itemx)
+        // 		}
+        // 	})
+        // }
+
+        syncCreatedLocalItemsToRemote(
+          dataToCreate,
+          dataToEdit,
+          itemsFinal,
+          dataToDelete.length === 0
+        );
       }
     },
     [props.remoteMethods]
   );
 
   const syncCreatedLocalItemsToRemote = useCallback(
-    (dataToCreate: T[], dataToEdit: T[], dataWithoutChanges: T[]) => {
-      let itemsFinal = dataWithoutChanges;
+    (
+      dataToCreate: T[],
+      dataToEdit: T[],
+      dataWithoutChanges: T[],
+      didSyncLocalDeletions: boolean
+    ) => {
+      if (props.remoteMethods && props.remoteMethods.CREATE) {
+        let itemsFinal = dataWithoutChanges;
+        if (dataToCreate.length > 0) {
+          Promise.all(
+            dataToCreate.map(async (item) => {
+              try {
+                const itemCreated =
+                  props.remoteMethods &&
+                  props.remoteMethods.CREATE &&
+                  props.remoteMethods.CREATE(item);
 
-      if (dataToCreate.length > 0) {
-        Promise.all(
-          dataToCreate.map(async (item) => {
-            try {
-              const itemCreated =
-                props.remoteMethods && props.remoteMethods.CREATE(item);
-
-              return itemCreated;
-            } catch (err: any) {
-              setError(`ERROR 021:` + JSON.stringify(err));
-              return null;
-            }
-          })
-        )
-          .then((itemsCreated) => {
-            hasDataChanged.current = true;
-            const filteredItemsCreated: (T | null | undefined)[] =
-              itemsCreated.filter((item) => item !== null);
-            filteredItemsCreated.map((itemx) => {
-              if (itemx !== null && itemx !== undefined) {
-                itemsFinal.push(itemx);
+                return itemCreated;
+              } catch (err: any) {
+                setError(`ERROR NEXUSSYNC_021:` + JSON.stringify(err));
+                return null;
               }
-            });
+            })
+          )
+            .then((itemsCreated) => {
+              hasDataChanged.current = true;
+              const filteredItemsCreated: (T | null | undefined)[] =
+                itemsCreated.filter((item) => item !== null);
+              filteredItemsCreated.map((itemx) => {
+                if (itemx !== null && itemx !== undefined) {
+                  itemsFinal.push(itemx);
+                }
+              });
 
-            syncEditedLocalItemsToRemote(dataToEdit, itemsFinal);
-          })
-          .catch((err: any) => {
-            setError(`ERROR 009:` + JSON.stringify(err));
-          });
+              if (numberOfChangesPending && numberOfChangesPending > 0) {
+                setNumberOfChangesPending(
+                  numberOfChangesPending - dataToCreate.length
+                );
+              }
+
+              syncEditedLocalItemsToRemote(
+                dataToEdit,
+                itemsFinal,
+                didSyncLocalDeletions && true
+              );
+            })
+            .catch((err: any) => {
+              setError(`ERROR NEXUSSYNC_009:` + JSON.stringify(err));
+            });
+        } else {
+          syncEditedLocalItemsToRemote(
+            dataToEdit,
+            itemsFinal,
+            didSyncLocalDeletions && true
+          );
+        }
       } else {
-        syncEditedLocalItemsToRemote(dataToEdit, itemsFinal);
+        if (dataToCreate.length > 0) {
+          dataToCreate.map((itemx) => {
+            if (itemx !== null && itemx !== undefined) {
+              dataWithoutChanges.push(itemx);
+            }
+          });
+        }
+
+        syncEditedLocalItemsToRemote(
+          dataToEdit,
+          dataWithoutChanges,
+          didSyncLocalDeletions && dataToCreate.length === 0
+        );
       }
     },
     [props.remoteMethods]
   );
 
   const syncEditedLocalItemsToRemote = useCallback(
-    (dataToEdit: T[], dataWithoutChanges: T[]) => {
-      if (dataToEdit.length > 0) {
-        let itemsFinal = dataWithoutChanges;
-        Promise.all(
-          dataToEdit.map(async (itemToEdit) => {
-            try {
-              const itemEdited =
-                props.remoteMethods && props.remoteMethods.UPDATE(itemToEdit);
+    (
+      dataToEdit: T[],
+      dataWithoutChanges: T[],
+      didSyncLocalDeletions: boolean
+    ) => {
+      if (props.remoteMethods && props.remoteMethods.UPDATE) {
+        if (dataToEdit.length > 0) {
+          let itemsFinal = dataWithoutChanges;
+          Promise.all(
+            dataToEdit.map(async (itemToEdit) => {
+              try {
+                const itemEdited =
+                  props.remoteMethods &&
+                  props.remoteMethods.UPDATE &&
+                  props.remoteMethods.UPDATE(itemToEdit);
 
-              return itemEdited;
-            } catch (err: any) {
-              setError(`ERROR 022:` + JSON.stringify(err));
-              return null;
-            }
-          })
-        )
-          .then((itemsCreated) => {
-            hasDataChanged.current = true;
-            const filteredItemsCreated: (T | null | undefined)[] =
-              itemsCreated.filter((item) => item !== null);
-            filteredItemsCreated.map((itemx) => {
-              if (itemx !== null && itemx !== undefined) {
-                itemsFinal.push(itemx);
+                return itemEdited;
+              } catch (err: any) {
+                setError(`ERROR NEXUSSYNC_022:` + JSON.stringify(err));
+                return null;
               }
-            });
+            })
+          )
+            .then((itemsCreated) => {
+              hasDataChanged.current = true;
+              const filteredItemsCreated: (T | null | undefined)[] =
+                itemsCreated.filter((item) => item !== null);
+              filteredItemsCreated.map((itemx) => {
+                if (itemx !== null && itemx !== undefined) {
+                  itemsFinal.push(itemx);
+                }
+              });
 
-            setData(itemsFinal);
-          })
-          .catch((err: any) => {
-            setError(`ERROR 010:` + JSON.stringify(err));
-          });
+              if (numberOfChangesPending && numberOfChangesPending > 0) {
+                setNumberOfChangesPending(
+                  numberOfChangesPending - dataToEdit.length
+                );
+              }
+
+              setIsRemoteDataUptoDate(didSyncLocalDeletions);
+              setData(itemsFinal);
+            })
+            .catch((err: any) => {
+              setIsRemoteDataUptoDate(didSyncLocalDeletions);
+              setError(`ERROR NEXUSSYNC_010:` + JSON.stringify(err));
+            });
+        } else {
+          setIsRemoteDataUptoDate(didSyncLocalDeletions);
+          setData(dataWithoutChanges);
+        }
       } else {
+        if (dataToEdit.length > 0) {
+          dataToEdit.map((itemx) => {
+            if (itemx !== null && itemx !== undefined) {
+              dataWithoutChanges.push(itemx);
+            }
+          });
+        }
+
+        setIsRemoteDataUptoDate(
+          didSyncLocalDeletions && dataToEdit.length === 0
+        );
         setData(dataWithoutChanges);
       }
     },
@@ -467,7 +611,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
     async (item: T) => {
       setLoading(true);
       // CREATE ITEM
-      if (isOnline && props.remoteMethods) {
+      if (isOnline && props.remoteMethods && props.remoteMethods.CREATE) {
         try {
           hasDataChanged.current = true;
           const createdItem = await props.remoteMethods.CREATE(item);
@@ -475,7 +619,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           setLoading(false);
         } catch {
           (err: any) => {
-            setError(`ERROR 011:` + JSON.stringify(err));
+            setError(`ERROR NEXUSSYNC_011:` + JSON.stringify(err));
             setLoading(false);
           };
         }
@@ -511,7 +655,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       setLoading(true);
 
       // UPDATE ITEM
-      if (isOnline && props.remoteMethods) {
+      if (isOnline && props.remoteMethods && props.remoteMethods.UPDATE) {
         try {
           hasDataChanged.current = true;
           const updatedItem = await props.remoteMethods.UPDATE(item);
@@ -519,7 +663,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           setLoading(false);
         } catch {
           (err: any) => {
-            setError(`ERROR 012:` + JSON.stringify(err));
+            setError(`ERROR NEXUSSYNC_012:` + JSON.stringify(err));
             setLoading(false);
           };
         }
@@ -556,7 +700,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
   const deleteItem = useCallback(
     async (item: T) => {
       setLoading(true);
-      if (isOnline && props.remoteMethods) {
+      if (isOnline && props.remoteMethods && props.remoteMethods.DELETE) {
         try {
           hasDataChanged.current = true;
           await props.remoteMethods.DELETE(item.id);
@@ -564,7 +708,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           setLoading(false);
         } catch {
           (err: any) => {
-            setError(`ERROR 013:` + JSON.stringify(err));
+            setError(`ERROR NEXUSSYNC_013:` + JSON.stringify(err));
             setLoading(false);
           };
         }
@@ -593,6 +737,9 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
     isOnline,
     error,
     backOnLine,
+    isLocalDataUptoDate,
+    isRemoteDataUptoDate,
+    numberOfChangesPending,
     refreshData,
     saveItem,
     updateItem,
