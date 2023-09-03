@@ -1,5 +1,7 @@
 # react-native-nexus-sync
 
+![alt text](https://elesteam.com/public_images/nexus_logo.png)
+
 Library that makes your App works Offline with auto Sync
 
 ## Installation
