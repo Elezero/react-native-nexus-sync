@@ -59,7 +59,6 @@ const MultipleItemsOffline = () => {
 			id: noteCreatedResponse.data.data.i_id,
 			title: noteToCreate.title,
 			status: noteToCreate.status,
-			version: noteCreatedResponse.data.data.i_version,
 			modificationDate: noteCreatedResponse.data.data.i_modificationDate
 		}
 	}
@@ -74,7 +73,6 @@ const MultipleItemsOffline = () => {
 			id: noteEditedResponse.data.data.i_id,
 			title: noteToUpdate.title,
 			status: noteToUpdate.status,
-			version: noteEditedResponse.data.data.i_version,
 			modificationDate: noteEditedResponse.data.data.i_modificationDate
 		}
 	}
@@ -114,7 +112,6 @@ const MultipleItemsOffline = () => {
 		id: '0',
 		title: '',
 		status: 0,
-		version: 1,
 		modificationDate: ''
 	})
 
@@ -150,7 +147,6 @@ const MultipleItemsOffline = () => {
 						id: '0',
 						title: '',
 						status: 0,
-						version: 1,
 						modificationDate: ''
 					})
 					setCreateEditModalVisible(true)
@@ -188,7 +184,6 @@ const MultipleItemsOffline = () => {
 							<Text style={{color: 'orange'}}>ID: {item.id} </Text>
 							<Text style={{color: 'orange'}}>TITLE: {item.title}</Text>
 							<Text style={{color: 'orange'}}>STATUS: {item.status}</Text>
-							<Text style={{color: 'orange'}}>VERSION: {item.version}</Text>
 							<Text style={{color: 'orange'}}>
 								MOD DATE: {item.modificationDate}
 							</Text>
