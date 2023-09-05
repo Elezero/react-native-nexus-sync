@@ -7,7 +7,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type NexusGenericPrimaryType = {
   id: string;
-  version: number;
   modificationDate: string;
   createdOffline?: boolean;
 };
@@ -202,45 +201,31 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
                   for (const remoteItem of remoteData) {
                     if (localItem.id == remoteItem.id) {
                       itemFound = true;
-                      if (localItem.version == remoteItem.version) {
-                        if (
-                          localItem.modificationDate ==
-                          remoteItem.modificationDate
-                        ) {
-                          // Local and Remote item are exactly the same
-                          dataWithoutChanges.push(localItem);
-                          break;
-                        } else {
-                          // Same version but different datetime
-                          const localItemModificationDate = new Date(
-                            localItem.modificationDate
-                          );
-                          const remoteItemModificationDate = new Date(
-                            remoteItem.modificationDate
-                          );
 
-                          if (
-                            localItemModificationDate >
-                            remoteItemModificationDate
-                          ) {
-                            // Local modification datetime is more recent
-                            // Will upload local changes to remote
-                            dataToEdit.push(localItem);
-                          } else {
-                            // Remote modification datetime is more recent
-                            // Will update local item
-                            dataWithoutChanges.push(remoteItem);
-                            _hasDataChanged = true;
-                          }
-                        }
+                      if (
+                        localItem.modificationDate ==
+                        remoteItem.modificationDate
+                      ) {
+                        // Local and Remote item are exactly the same
+                        dataWithoutChanges.push(localItem);
+                        break;
                       } else {
-                        // Local and Remote versions are different
-                        if (localItem.version > remoteItem.version) {
-                          // Local version is more recent
-                          // Will upload the local item changes to remote
+                        // Different datetime
+                        const localItemModificationDate = new Date(
+                          localItem.modificationDate
+                        );
+                        const remoteItemModificationDate = new Date(
+                          remoteItem.modificationDate
+                        );
+
+                        if (
+                          localItemModificationDate > remoteItemModificationDate
+                        ) {
+                          // Local modification datetime is more recent
+                          // Will upload local changes to remote
                           dataToEdit.push(localItem);
                         } else {
-                          // Remote version is more recent
+                          // Remote modification datetime is more recent
                           // Will update local item
                           dataWithoutChanges.push(remoteItem);
                           _hasDataChanged = true;
@@ -679,7 +664,6 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         setData(
           updateItemFromContext(item.id, {
             ...item,
-            version: Number.parseInt(item.version.toString()) + 1,
             modificationDate: formattedDate,
           })
         );
