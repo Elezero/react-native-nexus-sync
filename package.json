@@ -1,6 +1,6 @@
 {
   "name": "react-native-nexus-sync",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Library that makes your App works Offline with auto Sync",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",

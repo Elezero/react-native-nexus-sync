@@ -6,13 +6,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type NexusGenericPrimaryType = {
-  id: string;
-  modificationDate: string;
-  createdOffline?: boolean;
+  [x: string]: any;
 };
 
 interface UseNexusSyncProps<T extends NexusGenericPrimaryType> {
   async_DATA_KEY: string;
+  idAttributeName?: keyof T;
+  modificationDateAttributeName?: keyof T;
   loadFirstRemote?: boolean; // Will load local data by default
   autoRefreshOnBackOnline?: boolean;
   onBackOnline?: () => any;
@@ -154,6 +154,21 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 
   const getOfflineDeletedData = useCallback(
     (remoteData: T[]) => {
+      if (
+        props.idAttributeName === undefined ||
+        props.modificationDateAttributeName === undefined
+      ) {
+        console.warn(
+          `WARNING NEXUSSYNC_002: No idAttributeName or modificationDateAttributeName 
+					Attribute provided on hook initialization, it means that will this component will works offline 
+					and will be updated always local data and display Remote data `
+        );
+
+        setIsLocalDataUptoDate(true);
+        setData(remoteData);
+        return;
+      }
+
       let dataToDelete: string[] = [];
 
       AsyncStorage.getItem(props.async_DATA_KEY + '_deleted')
@@ -176,7 +191,12 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           compareLocalVsRemoteData(remoteData, []);
         });
     },
-    [props.async_DATA_KEY, isOnline]
+    [
+      props.async_DATA_KEY,
+      isOnline,
+      props.idAttributeName,
+      props.modificationDateAttributeName,
+    ]
   );
 
   const compareLocalVsRemoteData = useCallback(
@@ -199,36 +219,54 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
                   itemFound = false;
 
                   for (const remoteItem of remoteData) {
-                    if (localItem.id == remoteItem.id) {
-                      itemFound = true;
-
-                      if (
-                        localItem.modificationDate ==
-                        remoteItem.modificationDate
-                      ) {
-                        // Local and Remote item are exactly the same
-                        dataWithoutChanges.push(localItem);
-                        break;
-                      } else {
-                        // Different datetime
-                        const localItemModificationDate = new Date(
-                          localItem.modificationDate
-                        );
-                        const remoteItemModificationDate = new Date(
-                          remoteItem.modificationDate
-                        );
-
+                    if (props.idAttributeName !== undefined) {
+                      if (props.modificationDateAttributeName !== undefined) {
                         if (
-                          localItemModificationDate > remoteItemModificationDate
+                          localItem?.[props.idAttributeName] ==
+                          remoteItem?.[props.idAttributeName]
                         ) {
-                          // Local modification datetime is more recent
-                          // Will upload local changes to remote
-                          dataToEdit.push(localItem);
-                        } else {
-                          // Remote modification datetime is more recent
-                          // Will update local item
-                          dataWithoutChanges.push(remoteItem);
-                          _hasDataChanged = true;
+                          itemFound = true;
+
+                          if (
+                            localItem?.[props.modificationDateAttributeName] ==
+                            remoteItem?.[props.modificationDateAttributeName]
+                          ) {
+                            // Local and Remote item are exactly the same
+                            dataWithoutChanges.push(localItem);
+                            break;
+                          } else {
+                            // Different datetime
+                            const modificationDateLocalString: string =
+                              localItem?.[
+                                props.modificationDateAttributeName
+                              ] as string;
+
+                            const modificationDateRemoteString: string =
+                              remoteItem?.[
+                                props.modificationDateAttributeName
+                              ] as string;
+
+                            const localItemModificationDate = new Date(
+                              modificationDateLocalString
+                            );
+                            const remoteItemModificationDate = new Date(
+                              modificationDateRemoteString
+                            );
+
+                            if (
+                              localItemModificationDate >
+                              remoteItemModificationDate
+                            ) {
+                              // Local modification datetime is more recent
+                              // Will upload local changes to remote
+                              dataToEdit.push(localItem);
+                            } else {
+                              // Remote modification datetime is more recent
+                              // Will update local item
+                              dataWithoutChanges.push(remoteItem);
+                              _hasDataChanged = true;
+                            }
+                          }
                         }
                       }
                     }
@@ -236,7 +274,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 
                   if (!itemFound) {
                     // Local item is not in remote
-                    if (localItem.createdOffline) {
+                    if (localItem?.createdOffline) {
                       // Was created offile, will be created to Remote
                       dataToCreate.push(localItem);
                     } else {
@@ -251,12 +289,22 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
                 remoteData.map((remoteItem) => {
                   itemYa = false;
                   localData.map((localItem) => {
-                    if (remoteItem.id == localItem.id) {
+                    if (
+                      props.idAttributeName !== undefined &&
+                      remoteItem?.[props.idAttributeName] ==
+                        localItem?.[props.idAttributeName]
+                    ) {
                       itemYa = true;
                     }
                   });
 
-                  if (!itemYa && !dataToDelete.includes(remoteItem.id)) {
+                  if (
+                    props.idAttributeName !== undefined &&
+                    !itemYa &&
+                    !dataToDelete.includes(
+                      remoteItem?.[props.idAttributeName] as string
+                    )
+                  ) {
                     // this item is not in local
                     dataWithoutChanges.push(remoteItem);
                     _hasDataChanged = true;
@@ -313,7 +361,12 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           setError(`ERROR NEXUSSYNC_007:` + JSON.stringify(err));
         });
     },
-    [props.async_DATA_KEY, isOnline]
+    [
+      props.async_DATA_KEY,
+      isOnline,
+      props.idAttributeName,
+      props.modificationDateAttributeName,
+    ]
   );
 
   /* 
@@ -386,14 +439,6 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           );
         }
       } else {
-        // if (dataToDelete.length > 0) {
-        // 	dataToDelete.map(itemx => {
-        // 		if (itemx !== null && itemx !== undefined) {
-        // 			dataWithoutChanges.push(itemx)
-        // 		}
-        // 	})
-        // }
-
         syncCreatedLocalItemsToRemote(
           dataToCreate,
           dataToEdit,
@@ -402,7 +447,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         );
       }
     },
-    [props.remoteMethods]
+    [props.remoteMethods, numberOfChangesPending, hasDeletedChanged.current]
   );
 
   const syncCreatedLocalItemsToRemote = useCallback(
@@ -478,7 +523,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         );
       }
     },
-    [props.remoteMethods]
+    [props.remoteMethods, numberOfChangesPending]
   );
 
   const syncEditedLocalItemsToRemote = useCallback(
@@ -547,7 +592,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         setData(dataWithoutChanges);
       }
     },
-    [props.remoteMethods, setData]
+    [props.remoteMethods, setData, numberOfChangesPending]
   );
 
   /* 
@@ -556,23 +601,32 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
   const updateItemFromContext = useCallback(
     (id: string, new_item: T): T[] => {
       const updatedItems = data.map((item) => {
-        if (item.id == id) {
-          return { ...new_item, id: item.id };
+        if (props.idAttributeName && item?.[props.idAttributeName] == id) {
+          let newItem: any = {
+            ...new_item,
+          };
+          newItem[props.idAttributeName] = id;
+          return newItem;
         }
         return item;
       });
 
       return updatedItems;
     },
-    [data]
+    [data, props.idAttributeName]
   );
 
   const deleteItemFromContext = useCallback(
     (id: string): T[] => {
-      const updatedItems = data.filter((item) => item.id != id);
-      return updatedItems;
+      if (props.idAttributeName !== undefined) {
+        const updatedItems = data.filter(
+          (item) => item?.[props.idAttributeName ?? 'id'] != id
+        );
+        return updatedItems;
+      }
+      return data;
     },
-    [data]
+    [data, props.idAttributeName]
   );
 
   /* 
@@ -611,32 +665,63 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         setLoading(false);
       } else {
         // ONLY SAVE IN LOCAL OFFLINE
-        const currentDate = new Date();
-        const formattedDate = currentDate
-          .toISOString()
-          .slice(0, 19)
-          .replace('T', ' ');
+        if (
+          props.idAttributeName !== undefined &&
+          props.modificationDateAttributeName
+        ) {
+          const currentDate = new Date();
+          const formattedDate = currentDate
+            .toISOString()
+            .slice(0, 19)
+            .replace('T', ' ');
 
-        hasDataChanged.current = true;
+          hasDataChanged.current = true;
 
-        setData([
-          ...data,
-          {
+          let newItem: any = {
             ...item,
-            id: new Date().getTime(),
             createdOffline: true,
-            modificationDate: formattedDate,
-          },
-        ]);
+          };
+          newItem[props.modificationDateAttributeName] = formattedDate;
+          newItem[props.idAttributeName] = new Date().getTime().toString();
 
-        setLoading(false);
+          setData([...data, newItem]);
+
+          setLoading(false);
+        } else {
+          console.warn(
+            `WARNING NEXUSSYNC_003: No idAttributeName or modificationDateAttributeName 
+						Attribute provided on hook initialization, can not create local item`
+          );
+          setLoading(false);
+        }
       }
     },
-    [setLoading, isOnline, props.remoteMethods, setData, data]
+    [
+      setLoading,
+      isOnline,
+      props.remoteMethods,
+      setData,
+      data,
+      props.idAttributeName,
+      props.modificationDateAttributeName,
+    ]
   );
 
   const updateItem = useCallback(
     async (item: T) => {
+      if (
+        props.idAttributeName === undefined ||
+        props.modificationDateAttributeName === undefined
+      ) {
+        console.warn(
+          `WARNING NEXUSSYNC_006: Can not update item due to idAttributeName not provided on hook initialization`
+        );
+        setError(
+          `WARNING NEXUSSYNC_006: Can not update item due to idAttributeName not provided on hook initialization`
+        );
+        return;
+      }
+
       setLoading(true);
 
       // UPDATE ITEM
@@ -661,11 +746,17 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           .replace('T', ' ');
 
         hasDataChanged.current = true;
+
+        let editedItem: any = {
+          ...item,
+        };
+        editedItem[props.modificationDateAttributeName] = formattedDate;
+
         setData(
-          updateItemFromContext(item.id, {
-            ...item,
-            modificationDate: formattedDate,
-          })
+          updateItemFromContext(
+            item?.[props.idAttributeName] as string,
+            editedItem
+          )
         );
 
         setLoading(false);
@@ -678,17 +769,39 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       setData,
       updateItemFromContext,
       data,
+      props.idAttributeName,
+      props.modificationDateAttributeName,
     ]
   );
 
   const deleteItem = useCallback(
     async (item: T) => {
+      if (props.idAttributeName === undefined) {
+        console.warn(
+          `WARNING NEXUSSYNC_001: Can not delete item due to idAttributeName not provided on hook initialization`
+        );
+        setError(
+          `WARNING NEXUSSYNC_001: Can not delete item due to idAttributeName not provided on hook initialization`
+        );
+        return;
+      }
+
       setLoading(true);
-      if (isOnline && props.remoteMethods && props.remoteMethods.DELETE) {
+
+      if (
+        isOnline &&
+        props.remoteMethods &&
+        props.remoteMethods.DELETE &&
+        props.idAttributeName
+      ) {
         try {
           hasDataChanged.current = true;
-          await props.remoteMethods.DELETE(item.id);
-          setData(deleteItemFromContext(item.id));
+          await props.remoteMethods.DELETE(
+            item?.[props.idAttributeName] as string
+          );
+          setData(
+            deleteItemFromContext(item?.[props.idAttributeName] as string)
+          );
           setLoading(false);
         } catch {
           (err: any) => {
@@ -700,8 +813,16 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         // ONLY IN LOCAL OFFLINE
         hasDataChanged.current = true;
         hasDeletedChanged.current = true;
-        setData(deleteItemFromContext(item.id));
-        setDataDeletedOffline([...dataDeletedOffline, item.id]);
+        if (props.idAttributeName) {
+          setData(
+            deleteItemFromContext(item?.[props.idAttributeName] as string)
+          );
+          setDataDeletedOffline([
+            ...dataDeletedOffline,
+            item?.[props.idAttributeName] as string,
+          ]);
+        }
+
         setLoading(false);
       }
     },
@@ -712,6 +833,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       setData,
       updateItemFromContext,
       data,
+      props.idAttributeName,
     ]
   );
 
