@@ -48,6 +48,31 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
   const hasDeletedChanged = useRef(false);
   const alreadyRemoteLoaded = useRef(false);
 
+  // LOCAL STORAGE KEYS MANAGING
+  useEffect(() => {
+    const checkAndSaveLocalKeys = async () => {
+      AsyncStorage.getItem('NEXUSSYNC_KEYS').then((localKeysString) => {
+        const localKeys = JSON.parse(localKeysString ?? '[]') as string[];
+        if (!localKeys.includes(props.async_DATA_KEY)) {
+          localKeys.push(props.async_DATA_KEY);
+          AsyncStorage.setItem('NEXUSSYNC_KEYS', JSON.stringify(localKeys));
+        }
+      });
+    };
+
+    checkAndSaveLocalKeys();
+  }, []);
+
+  const deleteAllLocalSavedData = () => {
+    AsyncStorage.getItem('NEXUSSYNC_KEYS').then((localKeysString) => {
+      const localKeys = JSON.parse(localKeysString ?? '[]') as string[];
+
+      localKeys.forEach((localKey) => {
+        AsyncStorage.removeItem(localKey);
+      });
+    });
+  };
+
   // NETWORK LISTENER
   useEffect(() => {
     const unsubscribe: NetInfoSubscription = NetInfo.addEventListener(
@@ -851,5 +876,6 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
     updateItem,
     deleteItem,
     getRemoteData,
+    deleteAllLocalSavedData,
   };
 }
