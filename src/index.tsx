@@ -398,7 +398,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 			--- REFRESH HANDLING --- 
 	*/
   const refreshData = useCallback(() => {
-    if (isOnline) {
+    if (!isOnline) {
       getLocalData && getLocalData();
     } else {
       getRemoteData && getRemoteData();
