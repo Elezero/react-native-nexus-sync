@@ -5,12 +5,18 @@ import NetInfo, {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-type NexusGenericPrimaryType = {
+export type NexusGenericPrimaryType = {
   [x: string]: any;
 };
 
 interface UseNexusSyncProps<T extends NexusGenericPrimaryType> {
+  data: T[];
+  setData: (val: T[]) => void;
   async_DATA_KEY: string;
+  useMethodsOnly?: boolean;
+  syncRemoteData?: boolean;
+  syncLocalData?: boolean;
+  consoleDebug?: boolean;
   idAttributeName?: keyof T;
   modificationDateAttributeName?: keyof T;
   loadFirstRemote?: boolean; // Will load local data by default
@@ -29,7 +35,8 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 ) {
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const [isLoading, setLoading] = useState<boolean>(false);
-  const [data, setData] = useState<T[]>([]);
+  const syncingData = useRef<boolean>(false);
+
   const [error, setError] = useState<string | undefined>(undefined);
   const [isLocalDataUptoDate, setIsLocalDataUptoDate] = useState<
     boolean | undefined
@@ -60,7 +67,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       });
     };
 
-    checkAndSaveLocalKeys();
+    !props.useMethodsOnly && checkAndSaveLocalKeys();
   }, []);
 
   const deleteAllLocalSavedData = () => {
@@ -109,6 +116,9 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 			--- IMPORTANT USE EFFECTS --- 
 	*/
   useEffect(() => {
+    if (props.useMethodsOnly) {
+      return;
+    }
     if (
       !props.loadFirstRemote ||
       props.remoteMethods === undefined ||
@@ -119,18 +129,12 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
   }, []);
 
   useEffect(() => {
-    console.log(
-      `isLocalDataUptoDate |=========>`,
-      JSON.stringify(isLocalDataUptoDate)
-    );
-    console.log(
-      `isRemoteDataUptoDate |=========>`,
-      JSON.stringify(isRemoteDataUptoDate)
-    );
-    if (data.length > 0 && hasDataChanged.current) {
-      updateLocalData();
+    if (props.data) {
+      if (props.data.length > 0 && hasDataChanged.current) {
+        updateLocalData();
+      }
     }
-  }, [data]);
+  }, [props.data]);
 
   useEffect(() => {
     if (hasDeletedChanged.current) {
@@ -142,12 +146,17 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 			--- GETTING DATA FUNCTIONS --- 
 	*/
   const getLocalData = useCallback(async () => {
+    if (props.useMethodsOnly) {
+      return;
+    }
+
     AsyncStorage.getItem(props.async_DATA_KEY)
       .then((localDataString) => {
         if (localDataString) {
           try {
             const localData: T[] = JSON.parse(localDataString);
-            setData(localData);
+
+            props.setData(localData);
           } catch {
             (err: any) => {
               setError(`ERROR NEXUSSYNC_001:` + JSON.stringify(err));
@@ -158,9 +167,18 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       .catch((err: any) => {
         setError(`ERROR NEXUSSYNC_002:` + JSON.stringify(err));
       });
-  }, [setData, props.async_DATA_KEY]);
+  }, [
+    props.setData,
+    props.async_DATA_KEY,
+    props.useMethodsOnly,
+    props.consoleDebug,
+  ]);
 
   const getRemoteData = useCallback(() => {
+    if (props.useMethodsOnly) {
+      return;
+    }
+
     props.remoteMethods &&
       props.remoteMethods.GET &&
       props.remoteMethods
@@ -175,22 +193,32 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         .catch((err: any) => {
           setError(`ERROR NEXUSSYNC_003:` + JSON.stringify(err));
         });
-  }, [props.remoteMethods, setLoading]);
+  }, [
+    props.remoteMethods,
+    setLoading,
+    props.useMethodsOnly,
+    props.consoleDebug,
+  ]);
 
   const getOfflineDeletedData = useCallback(
     (remoteData: T[]) => {
+      if (props.useMethodsOnly) {
+        return;
+      }
+
       if (
         props.idAttributeName === undefined ||
         props.modificationDateAttributeName === undefined
       ) {
-        console.warn(
-          `WARNING NEXUSSYNC_002: No idAttributeName or modificationDateAttributeName 
+        props.consoleDebug &&
+          console.warn(
+            `WARNING NEXUSSYNC_002: No idAttributeName or modificationDateAttributeName 
 					Attribute provided on hook initialization, it means that will this component will works offline 
 					and will be updated always local data and display Remote data `
-        );
+          );
 
         setIsLocalDataUptoDate(true);
-        setData(remoteData);
+        props.setData(remoteData);
         return;
       }
 
@@ -221,11 +249,17 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       isOnline,
       props.idAttributeName,
       props.modificationDateAttributeName,
+      props.setData,
+      props.useMethodsOnly,
+      props.consoleDebug,
     ]
   );
 
   const compareLocalVsRemoteData = useCallback(
     (remoteData: T[], dataToDelete: string[]) => {
+      if (props.useMethodsOnly) {
+        return;
+      }
       let dataToCreate: T[] = [];
       let dataToEdit: T[] = [];
       let dataWithoutChanges: T[] = [];
@@ -347,6 +381,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
             }
           } else {
             // If there is nothing local will take all Remote
+
             dataWithoutChanges = remoteData;
             _hasDataChanged = true;
           }
@@ -354,25 +389,12 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           hasDataChanged.current = _hasDataChanged;
           setIsLocalDataUptoDate(true);
 
-          if (isOnline) {
+          if (isOnline && props.syncRemoteData && !syncingData.current) {
+            // setSyncingData(true)
+            syncingData.current = true;
             setNumberOfChangesPending(
               dataToDelete.length + dataToCreate.length + dataToEdit.length
             );
-            console.log(
-              `NumberOfChangesPending |=========>`,
-              JSON.stringify(
-                dataToDelete.length + dataToCreate.length + dataToEdit.length
-              )
-            );
-            console.log(
-              `dataToDelete |=========>`,
-              JSON.stringify(dataToDelete)
-            );
-            console.log(
-              `dataToCreate |=========>`,
-              JSON.stringify(dataToCreate)
-            );
-            console.log(`dataToEdit |=========>`, JSON.stringify(dataToEdit));
 
             syncDeletedLocalItemsToRemote(
               dataToDelete,
@@ -380,6 +402,8 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
               dataToEdit,
               dataWithoutChanges
             );
+          } else {
+            props.setData(dataWithoutChanges);
           }
         })
         .catch((err: any) => {
@@ -391,6 +415,8 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       isOnline,
       props.idAttributeName,
       props.modificationDateAttributeName,
+      props.useMethodsOnly,
+      props.consoleDebug,
     ]
   );
 
@@ -398,13 +424,23 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 			--- REFRESH HANDLING --- 
 	*/
   const refreshData = useCallback(() => {
+    if (props.useMethodsOnly) {
+      return;
+    }
     if (!isOnline) {
       getLocalData && getLocalData();
     } else {
       getRemoteData && getRemoteData();
     }
     setBackOnLine(false);
-  }, [isOnline, getLocalData, getRemoteData, setBackOnLine]);
+  }, [
+    isOnline,
+    getLocalData,
+    getRemoteData,
+    setBackOnLine,
+    props.useMethodsOnly,
+    props.consoleDebug,
+  ]);
 
   /* 
 			--- SYNC METHODS --- 
@@ -416,6 +452,10 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       dataToEdit: T[],
       dataWithoutChanges: T[]
     ) => {
+      if (props.useMethodsOnly) {
+        return;
+      }
+
       let itemsFinal = dataWithoutChanges;
 
       if (props.remoteMethods && props.remoteMethods.DELETE) {
@@ -430,6 +470,8 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 
                 return itemDeleted;
               } catch (err: any) {
+                props.consoleDebug &&
+                  console.log(`err C|=========>`, JSON.stringify(err));
                 setError(`ERROR NEXUSSYNC_020:` + JSON.stringify(err));
                 return null;
               }
@@ -472,7 +514,13 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         );
       }
     },
-    [props.remoteMethods, numberOfChangesPending, hasDeletedChanged.current]
+    [
+      props.remoteMethods,
+      numberOfChangesPending,
+      hasDeletedChanged.current,
+      props.useMethodsOnly,
+      props.consoleDebug,
+    ]
   );
 
   const syncCreatedLocalItemsToRemote = useCallback(
@@ -482,6 +530,10 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       dataWithoutChanges: T[],
       didSyncLocalDeletions: boolean
     ) => {
+      if (props.useMethodsOnly) {
+        return;
+      }
+
       if (props.remoteMethods && props.remoteMethods.CREATE) {
         let itemsFinal = dataWithoutChanges;
         if (dataToCreate.length > 0) {
@@ -548,7 +600,12 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         );
       }
     },
-    [props.remoteMethods, numberOfChangesPending]
+    [
+      props.remoteMethods,
+      numberOfChangesPending,
+      props.useMethodsOnly,
+      props.consoleDebug,
+    ]
   );
 
   const syncEditedLocalItemsToRemote = useCallback(
@@ -557,6 +614,10 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       dataWithoutChanges: T[],
       didSyncLocalDeletions: boolean
     ) => {
+      if (props.useMethodsOnly) {
+        return;
+      }
+
       if (props.remoteMethods && props.remoteMethods.UPDATE) {
         if (dataToEdit.length > 0) {
           let itemsFinal = dataWithoutChanges;
@@ -592,7 +653,10 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
               }
 
               setIsRemoteDataUptoDate(didSyncLocalDeletions);
-              setData(itemsFinal);
+              props.setData(itemsFinal);
+
+              // setSyncingData(false)
+              syncingData.current = false;
             })
             .catch((err: any) => {
               setIsRemoteDataUptoDate(didSyncLocalDeletions);
@@ -600,7 +664,9 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
             });
         } else {
           setIsRemoteDataUptoDate(didSyncLocalDeletions);
-          setData(dataWithoutChanges);
+          props.setData(dataWithoutChanges);
+          // setSyncingData(false)
+          syncingData.current = false;
         }
       } else {
         if (dataToEdit.length > 0) {
@@ -614,10 +680,18 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         setIsRemoteDataUptoDate(
           didSyncLocalDeletions && dataToEdit.length === 0
         );
-        setData(dataWithoutChanges);
+        props.setData(dataWithoutChanges);
+        // setSyncingData(false)
+        syncingData.current = false;
       }
     },
-    [props.remoteMethods, setData, numberOfChangesPending]
+    [
+      props.remoteMethods,
+      props.setData,
+      numberOfChangesPending,
+      props.useMethodsOnly,
+      props.consoleDebug,
+    ]
   );
 
   /* 
@@ -625,7 +699,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 	*/
   const updateItemFromContext = useCallback(
     (id: string, new_item: T): T[] => {
-      const updatedItems = data.map((item) => {
+      const updatedItems = props.data.map((item) => {
         if (props.idAttributeName && item?.[props.idAttributeName] == id) {
           let newItem: any = {
             ...new_item,
@@ -638,35 +712,48 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 
       return updatedItems;
     },
-    [data, props.idAttributeName]
+    [props.data, props.idAttributeName]
   );
 
   const deleteItemFromContext = useCallback(
     (id: string): T[] => {
       if (props.idAttributeName !== undefined) {
-        const updatedItems = data.filter(
+        const updatedItems = props.data.filter(
           (item) => item?.[props.idAttributeName ?? 'id'] != id
         );
         return updatedItems;
       }
-      return data;
+      return props.data;
     },
-    [data, props.idAttributeName]
+    [props.data, props.idAttributeName]
   );
 
   /* 
 			--- ASYNC STORAGE FUNCTIONS --- 
 	*/
   const updateLocalData = useCallback(async () => {
-    await AsyncStorage.setItem(props.async_DATA_KEY, JSON.stringify(data));
-  }, [props.async_DATA_KEY, data]);
+    await AsyncStorage.setItem(
+      props.async_DATA_KEY,
+      JSON.stringify(props.data)
+    );
+  }, [
+    props.async_DATA_KEY,
+    props.data,
+    props.useMethodsOnly,
+    props.consoleDebug,
+  ]);
 
   const updateLocalDataDeletedOffline = useCallback(async () => {
     await AsyncStorage.setItem(
       props.async_DATA_KEY + '_deleted',
       JSON.stringify(dataDeletedOffline)
     );
-  }, [props.async_DATA_KEY, dataDeletedOffline]);
+  }, [
+    props.async_DATA_KEY,
+    dataDeletedOffline,
+    props.useMethodsOnly,
+    props.consoleDebug,
+  ]);
 
   /* 
 			--- EXPORTABLE CRUD FUNCTIONS --- 
@@ -675,11 +762,12 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
     async (item: T) => {
       setLoading(true);
       // CREATE ITEM
+
       if (isOnline && props.remoteMethods && props.remoteMethods.CREATE) {
         try {
           hasDataChanged.current = true;
           const createdItem = await props.remoteMethods.CREATE(item);
-          setData([...data, createdItem]);
+          props.setData([...props.data, createdItem]);
           setLoading(false);
         } catch {
           (err: any) => {
@@ -690,6 +778,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         setLoading(false);
       } else {
         // ONLY SAVE IN LOCAL OFFLINE
+
         if (
           props.idAttributeName !== undefined &&
           props.modificationDateAttributeName
@@ -709,7 +798,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           newItem[props.modificationDateAttributeName] = formattedDate;
           newItem[props.idAttributeName] = new Date().getTime().toString();
 
-          setData([...data, newItem]);
+          props.setData([...props.data, newItem]);
 
           setLoading(false);
         } else {
@@ -725,8 +814,8 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       setLoading,
       isOnline,
       props.remoteMethods,
-      setData,
-      data,
+      props.setData,
+      props.data,
       props.idAttributeName,
       props.modificationDateAttributeName,
     ]
@@ -754,7 +843,8 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         try {
           hasDataChanged.current = true;
           const updatedItem = await props.remoteMethods.UPDATE(item);
-          setData([...data, updatedItem]);
+          props.setData(updateItemFromContext(updatedItem.id, updatedItem));
+
           setLoading(false);
         } catch {
           (err: any) => {
@@ -777,7 +867,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         };
         editedItem[props.modificationDateAttributeName] = formattedDate;
 
-        setData(
+        props.setData(
           updateItemFromContext(
             item?.[props.idAttributeName] as string,
             editedItem
@@ -791,9 +881,9 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       setLoading,
       isOnline,
       props.remoteMethods,
-      setData,
+      props.setData,
       updateItemFromContext,
-      data,
+      props.data,
       props.idAttributeName,
       props.modificationDateAttributeName,
     ]
@@ -824,9 +914,10 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           await props.remoteMethods.DELETE(
             item?.[props.idAttributeName] as string
           );
-          setData(
+          props.setData(
             deleteItemFromContext(item?.[props.idAttributeName] as string)
           );
+
           setLoading(false);
         } catch {
           (err: any) => {
@@ -839,7 +930,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         hasDataChanged.current = true;
         hasDeletedChanged.current = true;
         if (props.idAttributeName) {
-          setData(
+          props.setData(
             deleteItemFromContext(item?.[props.idAttributeName] as string)
           );
           setDataDeletedOffline([
@@ -855,16 +946,17 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       setLoading,
       isOnline,
       props.remoteMethods,
-      setData,
+      props.setData,
       updateItemFromContext,
-      data,
+      props.data,
       props.idAttributeName,
     ]
   );
 
   return {
-    data,
+    data: props.data,
     isLoading,
+    syncingData,
     isOnline,
     error,
     backOnLine,
