@@ -174,84 +174,254 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
     props.consoleDebug,
   ]);
 
-  const getRemoteData = useCallback(() => {
-    if (props.useMethodsOnly) {
-      return;
-    }
-
-    props.remoteMethods &&
-      props.remoteMethods.GET &&
-      props.remoteMethods
-        .GET()
-        .then((res) => {
-          alreadyRemoteLoaded.current = true;
-          getOfflineDeletedData(res);
-        })
-        .finally(() => {
-          setLoading(false);
-        })
-        .catch((err: any) => {
-          setError(`ERROR NEXUSSYNC_003:` + JSON.stringify(err));
-        });
-  }, [
-    props.remoteMethods,
-    setLoading,
-    props.useMethodsOnly,
-    props.consoleDebug,
-  ]);
-
-  const getOfflineDeletedData = useCallback(
-    (remoteData: T[]) => {
+  const syncEditedLocalItemsToRemote = useCallback(
+    (
+      dataToEdit: T[],
+      dataWithoutChanges: T[],
+      didSyncLocalDeletions: boolean
+    ) => {
       if (props.useMethodsOnly) {
         return;
       }
 
-      if (
-        props.idAttributeName === undefined ||
-        props.modificationDateAttributeName === undefined
-      ) {
-        props.consoleDebug &&
-          console.warn(
-            `WARNING NEXUSSYNC_002: No idAttributeName or modificationDateAttributeName 
-					Attribute provided on hook initialization, it means that will this component will works offline 
-					and will be updated always local data and display Remote data `
-          );
+      if (props.remoteMethods && props.remoteMethods.UPDATE) {
+        if (dataToEdit.length > 0) {
+          let itemsFinal = dataWithoutChanges;
+          Promise.all(
+            dataToEdit.map(async (itemToEdit) => {
+              try {
+                const itemEdited =
+                  props.remoteMethods &&
+                  props.remoteMethods.UPDATE &&
+                  props.remoteMethods.UPDATE(itemToEdit);
 
-        setIsLocalDataUptoDate(true);
-        props.setData(remoteData);
+                return itemEdited;
+              } catch (err: any) {
+                setError(`ERROR NEXUSSYNC_022:` + JSON.stringify(err));
+                return null;
+              }
+            })
+          )
+            .then((itemsCreated) => {
+              hasDataChanged.current = true;
+              const filteredItemsCreated: (T | null | undefined)[] =
+                itemsCreated.filter((item) => item !== null);
+              filteredItemsCreated.map((itemx) => {
+                if (itemx !== null && itemx !== undefined) {
+                  itemsFinal.push(itemx);
+                }
+              });
+
+              if (numberOfChangesPending && numberOfChangesPending > 0) {
+                setNumberOfChangesPending(
+                  numberOfChangesPending - dataToEdit.length
+                );
+              }
+
+              setIsRemoteDataUptoDate(didSyncLocalDeletions);
+              props.setData(itemsFinal);
+
+              // setSyncingData(false)
+              syncingData.current = false;
+            })
+            .catch((err: any) => {
+              setIsRemoteDataUptoDate(didSyncLocalDeletions);
+              setError(`ERROR NEXUSSYNC_010:` + JSON.stringify(err));
+            });
+        } else {
+          setIsRemoteDataUptoDate(didSyncLocalDeletions);
+          props.setData(dataWithoutChanges);
+          // setSyncingData(false)
+          syncingData.current = false;
+        }
+      } else {
+        if (dataToEdit.length > 0) {
+          dataToEdit.map((itemx) => {
+            if (itemx !== null && itemx !== undefined) {
+              dataWithoutChanges.push(itemx);
+            }
+          });
+        }
+
+        setIsRemoteDataUptoDate(
+          didSyncLocalDeletions && dataToEdit.length === 0
+        );
+        props.setData(dataWithoutChanges);
+        // setSyncingData(false)
+        syncingData.current = false;
+      }
+    },
+    [
+      props.remoteMethods,
+      props.setData,
+      numberOfChangesPending,
+      props.useMethodsOnly,
+      props.consoleDebug,
+    ]
+  );
+
+  const syncCreatedLocalItemsToRemote = useCallback(
+    (
+      dataToCreate: T[],
+      dataToEdit: T[],
+      dataWithoutChanges: T[],
+      didSyncLocalDeletions: boolean
+    ) => {
+      if (props.useMethodsOnly) {
         return;
       }
 
-      let dataToDelete: string[] = [];
+      if (props.remoteMethods && props.remoteMethods.CREATE) {
+        let itemsFinal = dataWithoutChanges;
+        if (dataToCreate.length > 0) {
+          Promise.all(
+            dataToCreate.map(async (item) => {
+              try {
+                const itemCreated =
+                  props.remoteMethods &&
+                  props.remoteMethods.CREATE &&
+                  props.remoteMethods.CREATE(item);
 
-      AsyncStorage.getItem(props.async_DATA_KEY + '_deleted')
-        .then((localDataDeletedOfflineString) => {
-          if (localDataDeletedOfflineString) {
-            try {
-              dataToDelete = JSON.parse(localDataDeletedOfflineString);
+                return itemCreated;
+              } catch (err: any) {
+                setError(`ERROR NEXUSSYNC_021:` + JSON.stringify(err));
+                return null;
+              }
+            })
+          )
+            .then((itemsCreated) => {
               hasDataChanged.current = true;
-            } catch {
-              (err: any) => {
-                setError(`ERROR NEXUSSYNC_005:` + JSON.stringify(err));
-              };
-            }
-          }
+              const filteredItemsCreated: (T | null | undefined)[] =
+                itemsCreated.filter((item) => item !== null);
+              filteredItemsCreated.map((itemx) => {
+                if (itemx !== null && itemx !== undefined) {
+                  itemsFinal.push(itemx);
+                }
+              });
 
-          compareLocalVsRemoteData(remoteData, dataToDelete);
-        })
-        .catch((err: any) => {
-          setError(`ERROR NEXUSSYNC_004:` + JSON.stringify(err));
-          compareLocalVsRemoteData(remoteData, []);
-        });
+              if (numberOfChangesPending && numberOfChangesPending > 0) {
+                setNumberOfChangesPending(
+                  numberOfChangesPending - dataToCreate.length
+                );
+              }
+
+              syncEditedLocalItemsToRemote(
+                dataToEdit,
+                itemsFinal,
+                didSyncLocalDeletions && true
+              );
+            })
+            .catch((err: any) => {
+              setError(`ERROR NEXUSSYNC_009:` + JSON.stringify(err));
+            });
+        } else {
+          syncEditedLocalItemsToRemote(
+            dataToEdit,
+            itemsFinal,
+            didSyncLocalDeletions && true
+          );
+        }
+      } else {
+        if (dataToCreate.length > 0) {
+          dataToCreate.map((itemx) => {
+            if (itemx !== null && itemx !== undefined) {
+              dataWithoutChanges.push(itemx);
+            }
+          });
+        }
+
+        syncEditedLocalItemsToRemote(
+          dataToEdit,
+          dataWithoutChanges,
+          didSyncLocalDeletions && dataToCreate.length === 0
+        );
+      }
     },
     [
-      props.async_DATA_KEY,
-      isOnline,
-      props.idAttributeName,
-      props.modificationDateAttributeName,
-      props.setData,
+      props.remoteMethods,
+      numberOfChangesPending,
       props.useMethodsOnly,
       props.consoleDebug,
+      syncEditedLocalItemsToRemote,
+    ]
+  );
+
+  const syncDeletedLocalItemsToRemote = useCallback(
+    (
+      dataToDelete: string[],
+      dataToCreate: T[],
+      dataToEdit: T[],
+      dataWithoutChanges: T[]
+    ) => {
+      if (props.useMethodsOnly) {
+        return;
+      }
+
+      let itemsFinal = dataWithoutChanges;
+
+      if (props.remoteMethods && props.remoteMethods.DELETE) {
+        if (dataToDelete.length > 0) {
+          Promise.all(
+            dataToDelete.map(async (item) => {
+              try {
+                const itemDeleted =
+                  props.remoteMethods &&
+                  props.remoteMethods.DELETE &&
+                  props.remoteMethods.DELETE(item);
+
+                return itemDeleted;
+              } catch (err: any) {
+                props.consoleDebug &&
+                  console.log(`err C|=========>`, JSON.stringify(err));
+                setError(`ERROR NEXUSSYNC_020:` + JSON.stringify(err));
+                return null;
+              }
+            })
+          )
+            .then(() => {
+              hasDeletedChanged.current = true;
+              setDataDeletedOffline([]);
+
+              if (numberOfChangesPending && numberOfChangesPending > 0) {
+                setNumberOfChangesPending(
+                  numberOfChangesPending - dataToDelete.length
+                );
+              }
+
+              syncCreatedLocalItemsToRemote(
+                dataToCreate,
+                dataToEdit,
+                itemsFinal,
+                true
+              );
+            })
+            .catch((err: any) => {
+              setError(`ERROR NEXUSSYNC_008:` + JSON.stringify(err));
+            });
+        } else {
+          syncCreatedLocalItemsToRemote(
+            dataToCreate,
+            dataToEdit,
+            itemsFinal,
+            true
+          );
+        }
+      } else {
+        syncCreatedLocalItemsToRemote(
+          dataToCreate,
+          dataToEdit,
+          itemsFinal,
+          dataToDelete.length === 0
+        );
+      }
+    },
+    [
+      props.remoteMethods,
+      numberOfChangesPending,
+      hasDeletedChanged.current,
+      props.useMethodsOnly,
+      props.consoleDebug,
+      syncCreatedLocalItemsToRemote,
     ]
   );
 
@@ -270,6 +440,14 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       AsyncStorage.getItem(props.async_DATA_KEY)
         .then((localDataString) => {
           if (localDataString) {
+            console.log(
+              `localDataString XXXXX|=========>`,
+              JSON.stringify(localDataString)
+            );
+            console.log(
+              `remoteData yyYYY|=========>`,
+              JSON.stringify(remoteData)
+            );
             try {
               const localData: T[] = JSON.parse(localDataString);
 
@@ -417,8 +595,92 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       props.modificationDateAttributeName,
       props.useMethodsOnly,
       props.consoleDebug,
+      syncCreatedLocalItemsToRemote,
     ]
   );
+
+  const getOfflineDeletedData = useCallback(
+    (remoteData: T[]) => {
+      if (props.useMethodsOnly) {
+        return;
+      }
+
+      if (
+        props.idAttributeName === undefined ||
+        props.modificationDateAttributeName === undefined
+      ) {
+        props.consoleDebug &&
+          console.warn(
+            `WARNING NEXUSSYNC_002: No idAttributeName or modificationDateAttributeName 
+					Attribute provided on hook initialization, it means that will this component will works offline 
+					and will be updated always local data and display Remote data `
+          );
+
+        setIsLocalDataUptoDate(true);
+        props.setData(remoteData);
+        return;
+      }
+
+      let dataToDelete: string[] = [];
+
+      AsyncStorage.getItem(props.async_DATA_KEY + '_deleted')
+        .then((localDataDeletedOfflineString) => {
+          if (localDataDeletedOfflineString) {
+            try {
+              dataToDelete = JSON.parse(localDataDeletedOfflineString);
+              hasDataChanged.current = true;
+            } catch {
+              (err: any) => {
+                setError(`ERROR NEXUSSYNC_005:` + JSON.stringify(err));
+              };
+            }
+          }
+
+          compareLocalVsRemoteData(remoteData, dataToDelete);
+        })
+        .catch((err: any) => {
+          setError(`ERROR NEXUSSYNC_004:` + JSON.stringify(err));
+          compareLocalVsRemoteData(remoteData, []);
+        });
+    },
+    [
+      props.async_DATA_KEY,
+      isOnline,
+      props.idAttributeName,
+      props.modificationDateAttributeName,
+      props.setData,
+      props.useMethodsOnly,
+      props.consoleDebug,
+      compareLocalVsRemoteData,
+    ]
+  );
+
+  const getRemoteData = useCallback(() => {
+    if (props.useMethodsOnly) {
+      return;
+    }
+
+    props.remoteMethods &&
+      props.remoteMethods.GET &&
+      props.remoteMethods
+        .GET()
+        .then((res) => {
+          alreadyRemoteLoaded.current = true;
+          getOfflineDeletedData(res);
+        })
+        .finally(() => {
+          setLoading(false);
+        })
+        .catch((err: any) => {
+          setError(`ERROR NEXUSSYNC_003:` + JSON.stringify(err));
+        });
+  }, [
+    props.remoteMethods,
+    setLoading,
+    props.useMethodsOnly,
+    props.consoleDebug,
+    getOfflineDeletedData,
+  ]);
 
   /* 
 			--- REFRESH HANDLING --- 
@@ -441,258 +703,6 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
     props.useMethodsOnly,
     props.consoleDebug,
   ]);
-
-  /* 
-			--- SYNC METHODS --- 
-	*/
-  const syncDeletedLocalItemsToRemote = useCallback(
-    (
-      dataToDelete: string[],
-      dataToCreate: T[],
-      dataToEdit: T[],
-      dataWithoutChanges: T[]
-    ) => {
-      if (props.useMethodsOnly) {
-        return;
-      }
-
-      let itemsFinal = dataWithoutChanges;
-
-      if (props.remoteMethods && props.remoteMethods.DELETE) {
-        if (dataToDelete.length > 0) {
-          Promise.all(
-            dataToDelete.map(async (item) => {
-              try {
-                const itemDeleted =
-                  props.remoteMethods &&
-                  props.remoteMethods.DELETE &&
-                  props.remoteMethods.DELETE(item);
-
-                return itemDeleted;
-              } catch (err: any) {
-                props.consoleDebug &&
-                  console.log(`err C|=========>`, JSON.stringify(err));
-                setError(`ERROR NEXUSSYNC_020:` + JSON.stringify(err));
-                return null;
-              }
-            })
-          )
-            .then(() => {
-              hasDeletedChanged.current = true;
-              setDataDeletedOffline([]);
-
-              if (numberOfChangesPending && numberOfChangesPending > 0) {
-                setNumberOfChangesPending(
-                  numberOfChangesPending - dataToDelete.length
-                );
-              }
-
-              syncCreatedLocalItemsToRemote(
-                dataToCreate,
-                dataToEdit,
-                itemsFinal,
-                true
-              );
-            })
-            .catch((err: any) => {
-              setError(`ERROR NEXUSSYNC_008:` + JSON.stringify(err));
-            });
-        } else {
-          syncCreatedLocalItemsToRemote(
-            dataToCreate,
-            dataToEdit,
-            itemsFinal,
-            true
-          );
-        }
-      } else {
-        syncCreatedLocalItemsToRemote(
-          dataToCreate,
-          dataToEdit,
-          itemsFinal,
-          dataToDelete.length === 0
-        );
-      }
-    },
-    [
-      props.remoteMethods,
-      numberOfChangesPending,
-      hasDeletedChanged.current,
-      props.useMethodsOnly,
-      props.consoleDebug,
-    ]
-  );
-
-  const syncCreatedLocalItemsToRemote = useCallback(
-    (
-      dataToCreate: T[],
-      dataToEdit: T[],
-      dataWithoutChanges: T[],
-      didSyncLocalDeletions: boolean
-    ) => {
-      if (props.useMethodsOnly) {
-        return;
-      }
-
-      if (props.remoteMethods && props.remoteMethods.CREATE) {
-        let itemsFinal = dataWithoutChanges;
-        if (dataToCreate.length > 0) {
-          Promise.all(
-            dataToCreate.map(async (item) => {
-              try {
-                const itemCreated =
-                  props.remoteMethods &&
-                  props.remoteMethods.CREATE &&
-                  props.remoteMethods.CREATE(item);
-
-                return itemCreated;
-              } catch (err: any) {
-                setError(`ERROR NEXUSSYNC_021:` + JSON.stringify(err));
-                return null;
-              }
-            })
-          )
-            .then((itemsCreated) => {
-              hasDataChanged.current = true;
-              const filteredItemsCreated: (T | null | undefined)[] =
-                itemsCreated.filter((item) => item !== null);
-              filteredItemsCreated.map((itemx) => {
-                if (itemx !== null && itemx !== undefined) {
-                  itemsFinal.push(itemx);
-                }
-              });
-
-              if (numberOfChangesPending && numberOfChangesPending > 0) {
-                setNumberOfChangesPending(
-                  numberOfChangesPending - dataToCreate.length
-                );
-              }
-
-              syncEditedLocalItemsToRemote(
-                dataToEdit,
-                itemsFinal,
-                didSyncLocalDeletions && true
-              );
-            })
-            .catch((err: any) => {
-              setError(`ERROR NEXUSSYNC_009:` + JSON.stringify(err));
-            });
-        } else {
-          syncEditedLocalItemsToRemote(
-            dataToEdit,
-            itemsFinal,
-            didSyncLocalDeletions && true
-          );
-        }
-      } else {
-        if (dataToCreate.length > 0) {
-          dataToCreate.map((itemx) => {
-            if (itemx !== null && itemx !== undefined) {
-              dataWithoutChanges.push(itemx);
-            }
-          });
-        }
-
-        syncEditedLocalItemsToRemote(
-          dataToEdit,
-          dataWithoutChanges,
-          didSyncLocalDeletions && dataToCreate.length === 0
-        );
-      }
-    },
-    [
-      props.remoteMethods,
-      numberOfChangesPending,
-      props.useMethodsOnly,
-      props.consoleDebug,
-    ]
-  );
-
-  const syncEditedLocalItemsToRemote = useCallback(
-    (
-      dataToEdit: T[],
-      dataWithoutChanges: T[],
-      didSyncLocalDeletions: boolean
-    ) => {
-      if (props.useMethodsOnly) {
-        return;
-      }
-
-      if (props.remoteMethods && props.remoteMethods.UPDATE) {
-        if (dataToEdit.length > 0) {
-          let itemsFinal = dataWithoutChanges;
-          Promise.all(
-            dataToEdit.map(async (itemToEdit) => {
-              try {
-                const itemEdited =
-                  props.remoteMethods &&
-                  props.remoteMethods.UPDATE &&
-                  props.remoteMethods.UPDATE(itemToEdit);
-
-                return itemEdited;
-              } catch (err: any) {
-                setError(`ERROR NEXUSSYNC_022:` + JSON.stringify(err));
-                return null;
-              }
-            })
-          )
-            .then((itemsCreated) => {
-              hasDataChanged.current = true;
-              const filteredItemsCreated: (T | null | undefined)[] =
-                itemsCreated.filter((item) => item !== null);
-              filteredItemsCreated.map((itemx) => {
-                if (itemx !== null && itemx !== undefined) {
-                  itemsFinal.push(itemx);
-                }
-              });
-
-              if (numberOfChangesPending && numberOfChangesPending > 0) {
-                setNumberOfChangesPending(
-                  numberOfChangesPending - dataToEdit.length
-                );
-              }
-
-              setIsRemoteDataUptoDate(didSyncLocalDeletions);
-              props.setData(itemsFinal);
-
-              // setSyncingData(false)
-              syncingData.current = false;
-            })
-            .catch((err: any) => {
-              setIsRemoteDataUptoDate(didSyncLocalDeletions);
-              setError(`ERROR NEXUSSYNC_010:` + JSON.stringify(err));
-            });
-        } else {
-          setIsRemoteDataUptoDate(didSyncLocalDeletions);
-          props.setData(dataWithoutChanges);
-          // setSyncingData(false)
-          syncingData.current = false;
-        }
-      } else {
-        if (dataToEdit.length > 0) {
-          dataToEdit.map((itemx) => {
-            if (itemx !== null && itemx !== undefined) {
-              dataWithoutChanges.push(itemx);
-            }
-          });
-        }
-
-        setIsRemoteDataUptoDate(
-          didSyncLocalDeletions && dataToEdit.length === 0
-        );
-        props.setData(dataWithoutChanges);
-        // setSyncingData(false)
-        syncingData.current = false;
-      }
-    },
-    [
-      props.remoteMethods,
-      props.setData,
-      numberOfChangesPending,
-      props.useMethodsOnly,
-      props.consoleDebug,
-    ]
-  );
 
   /* 
 			--- HELPER FUNCTIONS  --- 
@@ -732,6 +742,8 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 			--- ASYNC STORAGE FUNCTIONS --- 
 	*/
   const updateLocalData = useCallback(async () => {
+    console.log(`xxxxxXXX ABOUT TO SYNC LOCAL DATA | --------------`);
+    console.log(`props.data |=========>`, JSON.stringify(props.data));
     await AsyncStorage.setItem(
       props.async_DATA_KEY,
       JSON.stringify(props.data)
@@ -759,7 +771,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
 			--- EXPORTABLE CRUD FUNCTIONS --- 
 	*/
   const saveItem = useCallback(
-    async (item: T) => {
+    async (item: T): Promise<T> => {
       setLoading(true);
       // CREATE ITEM
 
@@ -769,13 +781,12 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           const createdItem = await props.remoteMethods.CREATE(item);
           props.setData([...props.data, createdItem]);
           setLoading(false);
-        } catch {
-          (err: any) => {
-            setError(`ERROR NEXUSSYNC_011:` + JSON.stringify(err));
-            setLoading(false);
-          };
+          return createdItem;
+        } catch (err: any) {
+          setError(`ERROR NEXUSSYNC_011:` + JSON.stringify(err));
+          setLoading(false);
+          return Promise.reject(`ERROR NEXUSSYNC_011:` + JSON.stringify(err));
         }
-        setLoading(false);
       } else {
         // ONLY SAVE IN LOCAL OFFLINE
 
@@ -801,12 +812,14 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           props.setData([...props.data, newItem]);
 
           setLoading(false);
+          return newItem;
         } else {
           console.warn(
             `WARNING NEXUSSYNC_003: No idAttributeName or modificationDateAttributeName 
 						Attribute provided on hook initialization, can not create local item`
           );
           setLoading(false);
+          return Promise.reject(`ERROR NEXUSSYNC_0133: unkpnw`);
         }
       }
     },
@@ -822,7 +835,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
   );
 
   const updateItem = useCallback(
-    async (item: T) => {
+    async (item: T): Promise<T> => {
       if (
         props.idAttributeName === undefined ||
         props.modificationDateAttributeName === undefined
@@ -833,7 +846,9 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         setError(
           `WARNING NEXUSSYNC_006: Can not update item due to idAttributeName not provided on hook initialization`
         );
-        return;
+        return Promise.reject(
+          'WARNING NEXUSSYNC_006: Can not update item due to idAttributeName not provided on hook initialization'
+        );
       }
 
       setLoading(true);
@@ -846,11 +861,11 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
           props.setData(updateItemFromContext(updatedItem.id, updatedItem));
 
           setLoading(false);
-        } catch {
-          (err: any) => {
-            setError(`ERROR NEXUSSYNC_012:` + JSON.stringify(err));
-            setLoading(false);
-          };
+          return updatedItem;
+        } catch (err: any) {
+          setError(`ERROR NEXUSSYNC_012:` + JSON.stringify(err));
+          setLoading(false);
+          return Promise.reject(`ERROR NEXUSSYNC_012:` + JSON.stringify(err));
         }
       } else {
         // ONLY SAVE IN LOCAL OFFLINE
@@ -875,6 +890,7 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
         );
 
         setLoading(false);
+        return editedItem;
       }
     },
     [
@@ -950,6 +966,8 @@ export default function useNexusSync<T extends NexusGenericPrimaryType>(
       updateItemFromContext,
       props.data,
       props.idAttributeName,
+      dataDeletedOffline,
+      deleteItemFromContext,
     ]
   );
 
